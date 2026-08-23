@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Login - Hindustan Ganesh Mandal Karadaga</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="login-wrap">
+    <div class="login-card">
+        <div class="om">ॐ</div>
+        <h1>Hindustan Ganesh Mandal Karadaga</h1>
+        <p class="sub">Donation &amp; Expense Management &mdash; Admin Login</p>
+        <form id="login-form">
+            <div>
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" autocomplete="username" required>
+            </div>
+            <div>
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" autocomplete="current-password" required>
+            </div>
+            <div class="login-error" id="login-error"></div>
+            <button type="submit" class="btn btn-primary" id="login-btn">Login</button>
+        </form>
+        <div class="public-link">
+            View public transparency page: <a href="/public.html">Donations &amp; Expenses Summary</a>
+        </div>
+        <div id="setup-hint" class="public-link hidden" style="color:#c0392b;">
+            No admin account exists yet. Run <code>npm run init-db</code> in the project folder to create one.
+        </div>
+    </div>
+</div>
+<div id="toast-container"></div>
+<script src="/js/common.js"></script>
+<script>
+(async function init() {
+    try {
+        const status = await Api.get('/api/setup-status');
+        if (!status.adminExists) {
+            document.getElementById('setup-hint').classList.remove('hidden');
+        }
+    } catch (e) { /* ignore */ }
+
+    // If already logged in, skip straight to dashboard.
+    try {
+        const session = await Api.get('/api/auth/session');
+        if (session.loggedIn) window.location.href = '/dashboard.html';
+    } catch (e) { /* ignore */ }
+})();
+
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errorEl = document.getElementById('login-error');
+    const btn = document.getElementById('login-btn');
+    errorEl.textContent = '';
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+    btn.disabled = true;
+    btn.textContent = 'Logging in...';
+    try {
+        await Api.post('/api/auth/login', { username, password });
+        window.location.href = '/dashboard.html';
+    } catch (err) {
+        errorEl.textContent = err.message;
+        btn.disabled = false;
+        btn.textContent = 'Login';
+    }
+});
+</script>
+</body>
+</html>

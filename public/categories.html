@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Categories - Hindustan Ganesh Mandal Karadaga</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="layout-root"></div>
+<div class="container">
+    <div class="page-title">
+        <div>
+            <h2>Expense Categories</h2>
+            <p>Manage the categories used for recording expenses</p>
+        </div>
+    </div>
+
+    <div class="card" style="margin-bottom:18px;">
+        <label for="new-category">Add a custom category</label>
+        <form id="add-category-form" class="flex gap-8" style="align-items:flex-start;">
+            <input type="text" id="new-category" placeholder="e.g. Security, Tent House" maxlength="60" style="max-width:320px;">
+            <button type="submit" class="btn btn-primary">Add Category</button>
+        </form>
+    </div>
+
+    <div id="loading" class="spinner"></div>
+    <div id="table-card" class="card hidden">
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Category</th><th>Type</th><th>Actions</th></tr></thead>
+                <tbody id="categories-body"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div id="toast-container"></div>
+<script src="/js/common.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+let allCategories = [];
+
+async function loadCategories() {
+    document.getElementById('loading').classList.remove('hidden');
+    document.getElementById('table-card').classList.add('hidden');
+    try {
+        allCategories = await Api.get('/api/categories');
+        renderTable();
+    } catch (err) {
+        toast(err.message, 'error');
+    } finally {
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('table-card').classList.remove('hidden');
+    }
+}
+
+function renderTable() {
+    const body = document.getElementById('categories-body');
+    body.innerHTML = allCategories.map(c => `
+        <tr>
+            <td data-label="Category">${escapeHtml(c.name)}</td>
+            <td data-label="Type">${c.is_custom ? '<span class="badge">Custom</span>' : '<span class="badge other">Default</span>'}</td>
+            <td data-label="Actions">
+                <button class="btn btn-danger btn-sm" onclick="deleteCategory(${c.id})">Delete</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+async function deleteCategory(id) {
+    const c = allCategories.find(x => x.id === id);
+    const ok = await confirmAction({
+        title: 'Delete category?',
+        message: `Delete category "${c.name}"? This only works if no expenses use it.`,
+        confirmText: 'Delete'
+    });
+    if (!ok) return;
+    try {
+        await Api.del(`/api/categories/${id}`);
+        toast('Category deleted.', 'success');
+        loadCategories();
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+document.getElementById('add-category-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = document.getElementById('new-category');
+    const name = input.value.trim();
+    if (!name) return;
+    try {
+        await Api.post('/api/categories', { name });
+        input.value = '';
+        toast('Category added.', 'success');
+        loadCategories();
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+});
+
+(async function () {
+    const session = await initProtectedPage();
+    if (!session) return;
+    loadCategories();
+})();
+</script>
+</body>
+</html>

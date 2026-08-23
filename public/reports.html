@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reports - Hindustan Ganesh Mandal Karadaga</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="layout-root"></div>
+<div class="container">
+    <div class="page-title">
+        <div>
+            <h2>Reports</h2>
+            <p>Detailed breakdown of donations and expenses</p>
+        </div>
+        <div class="year-select-wrap">
+            <label for="year-select">Year</label>
+            <select id="year-select"></select>
+        </div>
+    </div>
+
+    <div id="loading" class="spinner"></div>
+
+    <div id="report-content" class="hidden">
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="label">Total Donations</div>
+                <div class="value" id="stat-donations">₹0</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Total Expenses</div>
+                <div class="value" id="stat-expenses">₹0</div>
+            </div>
+            <div class="stat-card" id="balance-card">
+                <div class="label">Remaining Balance</div>
+                <div class="value" id="stat-balance">₹0</div>
+            </div>
+        </div>
+
+        <div class="two-col" style="margin-bottom:16px;">
+            <div class="card chart-card">
+                <h3>Expenses by Category</h3>
+                <canvas id="categoryChart"></canvas>
+                <div id="category-empty" class="empty-state hidden">No expenses recorded yet.</div>
+            </div>
+            <div class="card chart-card">
+                <h3>Donations Over Time</h3>
+                <canvas id="donationTimeChart"></canvas>
+                <div id="donation-time-empty" class="empty-state hidden">No donations recorded yet.</div>
+            </div>
+        </div>
+
+        <div class="card chart-card" style="margin-bottom:16px;">
+            <h3>Monthly Income vs Expenses</h3>
+            <canvas id="monthlyChart"></canvas>
+        </div>
+
+        <div class="card" style="margin-bottom:16px;">
+            <h3 class="mt-0" style="color:var(--maroon-dark)">Top Donors</h3>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Donor</th><th>Total Donated</th><th>No. of Donations</th></tr></thead>
+                    <tbody id="top-donors-body"></tbody>
+                </table>
+            </div>
+            <div id="top-donors-empty" class="empty-state hidden">No donations recorded yet.</div>
+        </div>
+
+        <div class="card">
+            <h3 class="mt-0" style="color:var(--maroon-dark)">Public Transparency Page</h3>
+            <p class="muted" style="margin-top:0;">Control whether the public summary page (totals only, no donor phone numbers) is visible to visitors.</p>
+            <div class="flex gap-8" style="align-items:center;">
+                <label style="margin:0;">Status:</label>
+                <span id="public-status-badge" class="badge">Loading...</span>
+                <button class="btn btn-secondary btn-sm" id="toggle-public-btn">Toggle</button>
+                <a href="/public.html" target="_blank" class="btn btn-secondary btn-sm">View Public Page ↗</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="toast-container"></div>
+<script src="/js/common.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/vendor/chartjs/chart.umd.js"></script>
+<script>
+const CHART_COLORS = ['#ff7a1a', '#7a1e2b', '#d4af37', '#2f8f4e', '#1a5fb4', '#7a1ea1', '#c0392b', '#e0620a', '#5c1420', '#6b5d52', '#c98a2b', '#9c6b30', '#4a7c59'];
+let categoryChartInstance = null, donationTimeChartInstance = null, monthlyChartInstance = null;
+
+async function loadReport() {
+    const year = document.getElementById('year-select').value;
+    const params = new URLSearchParams();
+    if (year && year !== 'all') params.set('year', year);
+
+    document.getElementById('loading').classList.remove('hidden');
+    document.getElementById('report-content').classList.add('hidden');
+    document.getElementById('category-empty').classList.add('hidden');
+    document.getElementById('donation-time-empty').classList.add('hidden');
+    document.getElementById('top-donors-empty').classList.add('hidden');
+
+    try {
+        const data = await Api.get('/api/reports/full?' + params.toString());
+
+        document.getElementById('stat-donations').textContent = Money.format(data.totalDonations);
+        document.getElementById('stat-expenses').textContent = Money.format(data.totalExpenses);
+        document.getElementById('stat-balance').textContent = Money.format(data.remainingBalance);
+        const balanceCard = document.getElementById('balance-card');
+        balanceCard.classList.remove('balance-positive', 'balance-negative');
+        balanceCard.classList.add(data.remainingBalance >= 0 ? 'balance-positive' : 'balance-negative');
+
+        // Expenses by category (bar)
+        if (categoryChartInstance) { categoryChartInstance.destroy(); categoryChartInstance = null; }
+        if (data.expensesByCategory.length === 0) {
+            document.getElementById('category-empty').classList.remove('hidden');
+        } else {
+            categoryChartInstance = new Chart(document.getElementById('categoryChart'), {
+                type: 'bar',
+                data: {
+                    labels: data.expensesByCategory.map(c => c.category),
+                    datasets: [{
+                        label: 'Amount Spent',
+                        data: data.expensesByCategory.map(c => c.total),
+                        backgroundColor: CHART_COLORS
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    indexAxis: 'y',
+                    plugins: { legend: { display: false } },
+                    scales: { x: { beginAtZero: true } }
+                }
+            });
+        }
+
+        // Donations over time (line)
+        if (donationTimeChartInstance) { donationTimeChartInstance.destroy(); donationTimeChartInstance = null; }
+        if (data.donationsByDate.length === 0) {
+            document.getElementById('donation-time-empty').classList.remove('hidden');
+        } else {
+            donationTimeChartInstance = new Chart(document.getElementById('donationTimeChart'), {
+                type: 'line',
+                data: {
+                    labels: data.donationsByDate.map(d => formatDate(d.date)),
+                    datasets: [{
+                        label: 'Donations (₹)',
+                        data: data.donationsByDate.map(d => d.total),
+                        borderColor: '#ff7a1a',
+                        backgroundColor: 'rgba(255,122,26,0.15)',
+                        fill: true,
+                        tension: 0.25
+                    }]
+                },
+                options: { responsive: true, plugins: { legend: { display: false } } }
+            });
+        }
+
+        // Monthly income vs expenses (bar)
+        const months = Array.from(new Set([
+            ...data.monthlyDonations.map(m => m.month),
+            ...data.monthlyExpenses.map(m => m.month)
+        ])).sort();
+        const donationMap = Object.fromEntries(data.monthlyDonations.map(m => [m.month, m.total]));
+        const expenseMap = Object.fromEntries(data.monthlyExpenses.map(m => [m.month, m.total]));
+
+        if (monthlyChartInstance) { monthlyChartInstance.destroy(); monthlyChartInstance = null; }
+        monthlyChartInstance = new Chart(document.getElementById('monthlyChart'), {
+            type: 'bar',
+            data: {
+                labels: months,
+                datasets: [
+                    { label: 'Donations', data: months.map(m => donationMap[m] || 0), backgroundColor: '#ff7a1a' },
+                    { label: 'Expenses', data: months.map(m => expenseMap[m] || 0), backgroundColor: '#7a1e2b' }
+                ]
+            },
+            options: { responsive: true, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
+        });
+
+        // Top donors table
+        const donorsBody = document.getElementById('top-donors-body');
+        if (data.topDonors.length === 0) {
+            donorsBody.innerHTML = '';
+            document.getElementById('top-donors-empty').classList.remove('hidden');
+        } else {
+            donorsBody.innerHTML = data.topDonors.map(d => `
+                <tr>
+                    <td data-label="Donor">${escapeHtml(d.donor_name)}</td>
+                    <td data-label="Total Donated" class="amount-cell">${Money.format(d.total)}</td>
+                    <td data-label="No. of Donations">${d.donationCount}</td>
+                </tr>
+            `).join('');
+        }
+
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('report-content').classList.remove('hidden');
+
+        await loadPublicStatus();
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+let publicEnabled = true;
+async function loadPublicStatus() {
+    try {
+        const pub = await Api.get('/api/reports/public');
+        publicEnabled = pub.enabled;
+        renderPublicStatus();
+    } catch (err) { /* ignore */ }
+}
+function renderPublicStatus() {
+    const badge = document.getElementById('public-status-badge');
+    badge.textContent = publicEnabled ? 'Visible to public' : 'Hidden from public';
+    badge.className = 'badge ' + (publicEnabled ? 'cash' : 'other');
+}
+document.getElementById('toggle-public-btn').addEventListener('click', async () => {
+    try {
+        const res = await Api.post('/api/reports/public/toggle', { enabled: !publicEnabled });
+        publicEnabled = res.enabled;
+        renderPublicStatus();
+        toast(`Public page is now ${publicEnabled ? 'visible' : 'hidden'}.`, 'success');
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+});
+
+(async function () {
+    const session = await initProtectedPage();
+    if (!session) return;
+    await populateYearSelect(document.getElementById('year-select'), { selected: 'all' });
+    document.getElementById('year-select').addEventListener('change', loadReport);
+    loadReport();
+})();
+</script>
+</body>
+</html>

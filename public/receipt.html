@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Donation Receipt - Hindustan Ganesh Mandal Karadaga</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="print-actions">
+    <button class="btn btn-primary" onclick="window.print()">Print / Save as PDF</button>
+    <button class="btn btn-secondary" onclick="window.close()">Close</button>
+</div>
+
+<div id="loading" class="spinner"></div>
+<div class="receipt hidden" id="receipt">
+    <div class="receipt-header">
+        <div class="om">ॐ</div>
+        <h2>Hindustan Ganesh Mandal Karadaga</h2>
+        <p>Donation Receipt</p>
+    </div>
+    <div class="receipt-row"><span class="k">Receipt No.</span><span class="v" id="r-receipt-no"></span></div>
+    <div class="receipt-row"><span class="k">Donor Name</span><span class="v" id="r-donor"></span></div>
+    <div class="receipt-row"><span class="k">Date</span><span class="v" id="r-date"></span></div>
+    <div class="receipt-row"><span class="k">Payment Method</span><span class="v" id="r-method"></span></div>
+    <div class="receipt-amount">
+        <div class="muted" style="font-size:13px;">Amount Received</div>
+        <div class="num" id="r-amount"></div>
+    </div>
+    <div class="receipt-footer">
+        Thank you for your generous contribution towards Ganpati Utsav.<br>
+        This is a system-generated receipt.
+    </div>
+</div>
+
+<div id="toast-container"></div>
+<script src="/js/common.js"></script>
+<script>
+(async function () {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('id');
+    if (!id) {
+        toast('No donation specified.', 'error');
+        return;
+    }
+    try {
+        const d = await Api.get(`/api/donations/${id}`);
+        document.getElementById('r-receipt-no').textContent = d.receipt_number;
+        document.getElementById('r-donor').textContent = d.donor_name;
+        document.getElementById('r-date').textContent = formatDate(d.date);
+        document.getElementById('r-method').textContent = d.payment_method;
+        document.getElementById('r-amount').textContent = Money.format(d.amount);
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('receipt').classList.remove('hidden');
+    } catch (err) {
+        document.getElementById('loading').classList.add('hidden');
+        toast(err.message, 'error');
+    }
+})();
+</script>
+</body>
+</html>

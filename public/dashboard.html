@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard - Hindustan Ganesh Mandal Karadaga</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="layout-root"></div>
+<div class="container">
+    <div class="page-title">
+        <div>
+            <h2>Dashboard</h2>
+            <p>Overview of donations and expenses for the Mandal</p>
+        </div>
+        <div class="flex gap-8" style="flex-wrap:wrap; align-items:center;">
+            <div class="year-select-wrap">
+                <label for="year-select">Year</label>
+                <select id="year-select"></select>
+            </div>
+            <a href="donations.html" class="btn btn-primary">+ Add Donation</a>
+            <a href="expenses.html" class="btn btn-secondary">+ Add Expense</a>
+        </div>
+    </div>
+
+    <div id="loading" class="spinner"></div>
+
+    <div id="dashboard-content" class="hidden">
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="label">Total Donations</div>
+                <div class="value" id="stat-donations">₹0</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Total Expenses</div>
+                <div class="value" id="stat-expenses">₹0</div>
+            </div>
+            <div class="stat-card" id="balance-card">
+                <div class="label">Remaining Balance</div>
+                <div class="value" id="stat-balance">₹0</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Number of Donors</div>
+                <div class="value" id="stat-donor-count">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Number of Expenses</div>
+                <div class="value" id="stat-expense-count">0</div>
+            </div>
+        </div>
+
+        <div class="two-col">
+            <div class="card">
+                <h3 class="mt-0" style="color:var(--maroon-dark)">Recent Donations</h3>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Donor</th><th>Amount</th><th>Date</th><th>Method</th></tr></thead>
+                        <tbody id="recent-donations-body"></tbody>
+                    </table>
+                </div>
+                <div id="recent-donations-empty" class="empty-state hidden">No donations recorded yet.</div>
+            </div>
+            <div class="card">
+                <h3 class="mt-0" style="color:var(--maroon-dark)">Recent Expenses</h3>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Category</th><th>Amount</th><th>Date</th><th>Paid To</th></tr></thead>
+                        <tbody id="recent-expenses-body"></tbody>
+                    </table>
+                </div>
+                <div id="recent-expenses-empty" class="empty-state hidden">No expenses recorded yet.</div>
+            </div>
+        </div>
+
+        <div class="card chart-card" style="margin-top:16px;">
+            <h3>Income vs Expenses</h3>
+            <canvas id="summaryChart" height="90"></canvas>
+        </div>
+    </div>
+</div>
+<div id="toast-container"></div>
+<script src="/js/common.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/vendor/chartjs/chart.umd.js"></script>
+<script>
+let summaryChartInstance = null;
+
+async function loadDashboard() {
+    const year = document.getElementById('year-select').value;
+    const params = new URLSearchParams();
+    if (year && year !== 'all') params.set('year', year);
+
+    document.getElementById('loading').classList.remove('hidden');
+    document.getElementById('dashboard-content').classList.add('hidden');
+    document.getElementById('recent-donations-empty').classList.add('hidden');
+    document.getElementById('recent-expenses-empty').classList.add('hidden');
+
+    try {
+        const data = await Api.get('/api/reports/dashboard?' + params.toString());
+        document.getElementById('stat-donations').textContent = Money.format(data.totalDonations);
+        document.getElementById('stat-expenses').textContent = Money.format(data.totalExpenses);
+        document.getElementById('stat-donor-count').textContent = data.donorCount;
+        document.getElementById('stat-expense-count').textContent = data.expenseCount;
+
+        const balanceEl = document.getElementById('stat-balance');
+        balanceEl.textContent = Money.format(data.remainingBalance);
+        const balanceCard = document.getElementById('balance-card');
+        balanceCard.classList.remove('balance-positive', 'balance-negative');
+        balanceCard.classList.add(data.remainingBalance >= 0 ? 'balance-positive' : 'balance-negative');
+
+        const donationsBody = document.getElementById('recent-donations-body');
+        if (data.recentDonations.length === 0) {
+            donationsBody.innerHTML = '';
+            document.getElementById('recent-donations-empty').classList.remove('hidden');
+        } else {
+            donationsBody.innerHTML = data.recentDonations.map(d => `
+                <tr>
+                    <td data-label="Donor">${escapeHtml(d.donor_name)}</td>
+                    <td data-label="Amount" class="amount-cell">${Money.format(d.amount)}</td>
+                    <td data-label="Date">${formatDate(d.date)}</td>
+                    <td data-label="Method"><span class="badge ${paymentBadgeClass(d.payment_method)}">${escapeHtml(d.payment_method)}</span></td>
+                </tr>
+            `).join('');
+        }
+
+        const expensesBody = document.getElementById('recent-expenses-body');
+        if (data.recentExpenses.length === 0) {
+            expensesBody.innerHTML = '';
+            document.getElementById('recent-expenses-empty').classList.remove('hidden');
+        } else {
+            expensesBody.innerHTML = data.recentExpenses.map(e => `
+                <tr>
+                    <td data-label="Category">${escapeHtml(e.category_name)}</td>
+                    <td data-label="Amount" class="amount-cell">${Money.format(e.amount)}</td>
+                    <td data-label="Date">${formatDate(e.date)}</td>
+                    <td data-label="Paid To">${escapeHtml(e.paid_to || '-')}</td>
+                </tr>
+            `).join('');
+        }
+
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('dashboard-content').classList.remove('hidden');
+
+        if (summaryChartInstance) summaryChartInstance.destroy();
+        summaryChartInstance = new Chart(document.getElementById('summaryChart'), {
+            type: 'bar',
+            data: {
+                labels: ['Income vs Expenses'],
+                datasets: [
+                    { label: 'Donations', data: [data.totalDonations], backgroundColor: '#ff7a1a' },
+                    { label: 'Expenses', data: [data.totalExpenses], backgroundColor: '#7a1e2b' }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'bottom' } },
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+(async function () {
+    const session = await initProtectedPage();
+    if (!session) return;
+
+    await populateYearSelect(document.getElementById('year-select'), { selected: 'all' });
+    document.getElementById('year-select').addEventListener('change', loadDashboard);
+    loadDashboard();
+})();
+</script>
+</body>
+</html>

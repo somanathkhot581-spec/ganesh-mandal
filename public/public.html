@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Public Summary - Hindustan Ganesh Mandal Karadaga</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header class="app-header">
+    <div class="brand">
+        <div class="om">ॐ</div>
+        <div class="brand-text">
+            <h1>Hindustan Ganesh Mandal Karadaga</h1>
+            <span>Public Transparency Page</span>
+        </div>
+    </div>
+    <div class="header-actions">
+        <a href="/login.html" style="color:#fff8ee; font-size:13px; text-decoration:underline;">Admin Login</a>
+    </div>
+</header>
+
+<div class="container">
+    <div class="page-title">
+        <div>
+            <h2>Donations &amp; Expenses Summary</h2>
+            <p>Published for public transparency. Donor mobile numbers and internal notes are always kept private.</p>
+        </div>
+        <div class="year-select-wrap">
+            <label for="year-select">Year</label>
+            <select id="year-select"></select>
+        </div>
+    </div>
+
+    <div id="loading" class="spinner"></div>
+
+    <div id="disabled-state" class="card empty-state hidden">
+        This page has been disabled by the administrator. Please check back later.
+    </div>
+
+    <div id="public-content" class="hidden">
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="label">Total Donations Received</div>
+                <div class="value" id="stat-donations">₹0</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Total Expenses</div>
+                <div class="value" id="stat-expenses">₹0</div>
+            </div>
+            <div class="stat-card" id="balance-card">
+                <div class="label">Remaining Balance</div>
+                <div class="value" id="stat-balance">₹0</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Number of Donors</div>
+                <div class="value" id="stat-donor-count">0</div>
+            </div>
+        </div>
+
+        <div class="card chart-card" style="margin-bottom:16px;">
+            <h3>Expense Breakdown by Category</h3>
+            <canvas id="categoryChart"></canvas>
+            <div id="category-empty" class="empty-state hidden">No expenses recorded yet.</div>
+        </div>
+
+        <div class="two-col">
+            <div class="card">
+                <h3 class="mt-0" style="color:var(--maroon-dark)">Donors</h3>
+                <p class="muted" style="margin-top:0; font-size:13px;">Name and amount contributed. Phone numbers are never shown here.</p>
+                <div id="donors-list" class="public-list"></div>
+                <div id="donors-empty" class="empty-state hidden">No donations recorded yet.</div>
+            </div>
+            <div class="card">
+                <h3 class="mt-0" style="color:var(--maroon-dark)">Expenses</h3>
+                <p class="muted" style="margin-top:0; font-size:13px;">Every expense the Mandal has recorded.</p>
+                <div id="expenses-list" class="public-list"></div>
+                <div id="expenses-empty" class="empty-state hidden">No expenses recorded yet.</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="toast-container"></div>
+<script src="/js/common.js"></script>
+<script src="/vendor/chartjs/chart.umd.js"></script>
+<script>
+const CHART_COLORS = ['#ff7a1a', '#7a1e2b', '#d4af37', '#2f8f4e', '#1a5fb4', '#7a1ea1', '#c0392b', '#e0620a', '#5c1420', '#6b5d52', '#c98a2b', '#9c6b30', '#4a7c59'];
+let categoryChartInstance = null;
+
+async function loadPublicData() {
+    const year = document.getElementById('year-select').value;
+    const params = new URLSearchParams();
+    if (year && year !== 'all') params.set('year', year);
+
+    document.getElementById('loading').classList.remove('hidden');
+    document.getElementById('public-content').classList.add('hidden');
+    document.getElementById('disabled-state').classList.add('hidden');
+    document.getElementById('category-empty').classList.add('hidden');
+    document.getElementById('donors-empty').classList.add('hidden');
+    document.getElementById('expenses-empty').classList.add('hidden');
+
+    try {
+        const data = await Api.get('/api/reports/public?' + params.toString());
+        document.getElementById('loading').classList.add('hidden');
+
+        if (!data.enabled) {
+            document.getElementById('disabled-state').classList.remove('hidden');
+            return;
+        }
+
+        document.getElementById('stat-donations').textContent = Money.format(data.totalDonations);
+        document.getElementById('stat-expenses').textContent = Money.format(data.totalExpenses);
+        document.getElementById('stat-balance').textContent = Money.format(data.remainingBalance);
+        const balanceCard = document.getElementById('balance-card');
+        balanceCard.classList.remove('balance-positive', 'balance-negative');
+        balanceCard.classList.add(data.remainingBalance >= 0 ? 'balance-positive' : 'balance-negative');
+        document.getElementById('stat-donor-count').textContent = data.donorCount;
+
+        if (categoryChartInstance) { categoryChartInstance.destroy(); categoryChartInstance = null; }
+        if (data.expenseBreakdown.length === 0) {
+            document.getElementById('category-empty').classList.remove('hidden');
+        } else {
+            categoryChartInstance = new Chart(document.getElementById('categoryChart'), {
+                type: 'bar',
+                data: {
+                    labels: data.expenseBreakdown.map(c => c.category),
+                    datasets: [{ label: 'Amount Spent', data: data.expenseBreakdown.map(c => c.total), backgroundColor: CHART_COLORS }]
+                },
+                options: {
+                    responsive: true,
+                    indexAxis: 'y',
+                    plugins: { legend: { display: false } },
+                    scales: { x: { beginAtZero: true } }
+                }
+            });
+        }
+
+        const donorsList = document.getElementById('donors-list');
+        if (data.donationsList.length === 0) {
+            donorsList.innerHTML = '';
+            document.getElementById('donors-empty').classList.remove('hidden');
+        } else {
+            donorsList.innerHTML = data.donationsList.map(d => `
+                <div class="public-list-item">
+                    <div class="meta">
+                        <div class="name">${escapeHtml(d.donor_name)}</div>
+                        <div class="sub">${formatDate(d.date)}</div>
+                    </div>
+                    <div class="amount">${Money.format(d.amount)}</div>
+                </div>
+            `).join('');
+        }
+
+        const expensesList = document.getElementById('expenses-list');
+        if (data.expensesList.length === 0) {
+            expensesList.innerHTML = '';
+            document.getElementById('expenses-empty').classList.remove('hidden');
+        } else {
+            expensesList.innerHTML = data.expensesList.map(e => `
+                <div class="public-list-item">
+                    <div class="meta">
+                        <div class="name">${escapeHtml(e.category)}${e.description ? ' &mdash; ' + escapeHtml(e.description) : ''}</div>
+                        <div class="sub">${formatDate(e.date)}${e.paid_to ? ' &middot; Paid to ' + escapeHtml(e.paid_to) : ''}</div>
+                    </div>
+                    <div class="amount">${Money.format(e.amount)}</div>
+                </div>
+            `).join('');
+        }
+
+        document.getElementById('public-content').classList.remove('hidden');
+    } catch (err) {
+        document.getElementById('loading').classList.add('hidden');
+        toast(err.message, 'error');
+    }
+}
+
+(async function () {
+    await populateYearSelect(document.getElementById('year-select'), { selected: 'all' });
+    document.getElementById('year-select').addEventListener('change', loadPublicData);
+    loadPublicData();
+})();
+</script>
+</body>
+</html>
